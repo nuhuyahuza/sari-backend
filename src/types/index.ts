@@ -1,13 +1,17 @@
 import { Request } from 'express';
-import { User, Role, Permission, Research, ResearchFile, AuditLog } from '@prisma/client';
+import { Prisma } from "@prisma/client";
 
 // Extended Request interface with user
 export interface AuthenticatedRequest extends Request {
-  user?: User & {
-    role: Role & {
-      permissions: Permission[];
+  user?: Prisma.UserGetPayload<{
+    include: {
+      role: {
+        include: {
+          permissions: true;
+        };
+      };
     };
-  };
+  }>;
 }
 
 // User types
@@ -61,7 +65,13 @@ export interface CreateResearchDto {
   description?: string;
   abstract?: string;
   keywords?: string[];
-  status?: 'DRAFT' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'PUBLISHED';
+  status?:
+    | "DRAFT"
+    | "SUBMITTED"
+    | "UNDER_REVIEW"
+    | "APPROVED"
+    | "REJECTED"
+    | "PUBLISHED";
 }
 
 export interface UpdateResearchDto {
@@ -69,7 +79,13 @@ export interface UpdateResearchDto {
   description?: string;
   abstract?: string;
   keywords?: string[];
-  status?: 'DRAFT' | 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED' | 'PUBLISHED';
+  status?:
+    | "DRAFT"
+    | "SUBMITTED"
+    | "UNDER_REVIEW"
+    | "APPROVED"
+    | "REJECTED"
+    | "PUBLISHED";
 }
 
 // File types
@@ -117,27 +133,68 @@ export interface JwtPayload {
 }
 
 // Extended Prisma types with relations
-export type UserWithRole = User & {
-  role: Role;
-};
+export type UserWithRole = Prisma.UserGetPayload<{
+  include: {
+    role: true;
+  };
+}>;
 
-export type RoleWithPermissions = Role & {
-  permissions: Permission[];
-  users: User[];
-};
+export type UserWithRoleAndPermissions = Prisma.UserGetPayload<{
+  include: {
+    role: {
+      include: {
+        permissions: true;
+      };
+    };
+  };
+}>;
 
-export type ResearchWithAuthorAndFiles = Research & {
-  author: User;
-  files: ResearchFile[];
-};
+export type RoleWithPermissions = Prisma.RoleGetPayload<{
+  include: {
+    permissions: true;
+  };
+}>;
 
-export type ResearchFileWithUploader = ResearchFile & {
-  uploader: User;
-};
+export type ResearchWithAuthorAndFiles = Prisma.ResearchGetPayload<{
+  include: {
+    author: {
+      select: {
+        id: true;
+        email: true;
+        username: true;
+        firstName: true;
+        lastName: true;
+        isActive: true;
+        roleId: true;
+        createdAt: true;
+        updatedAt: true;
+      };
+    };
+    files: {
+      include: {
+        uploader: {
+          select: {
+            id: true;
+            firstName: true;
+            lastName: true;
+          };
+        };
+      };
+    };
+  };
+}>;
 
-export type AuditLogWithUser = AuditLog & {
-  user: User;
-};
+export type ResearchFileWithUploader = Prisma.ResearchFileGetPayload<{
+  include: {
+    uploader: true;
+  };
+}>;
+
+export type AuditLogWithUser = Prisma.AuditLogGetPayload<{
+  include: {
+    user: true;
+  };
+}>;
 
 // Permission check types
 export interface PermissionCheck {
@@ -150,4 +207,66 @@ export interface FileUploadConfig {
   maxSize: number;
   allowedMimeTypes: string[];
   uploadPath: string;
+}
+
+// Query filters
+export interface UserFilters {
+  search?: string;
+  roleId?: string;
+  isActive?: boolean;
+}
+
+export interface ResearchFilters {
+  search?: string;
+  status?: string;
+  authorId?: string;
+}
+
+export interface AuditLogFilters {
+  action?: string;
+  module?: string;
+  userId?: string;
+  startDate?: Date;
+  endDate?: Date;
+}
+
+export interface PaginationOptions {
+  page: number;
+  limit: number;
+}
+
+// Service response types
+export interface AuthResponse {
+  token: string;
+  user: UserWithRoleAndPermissions;
+}
+
+export interface UserListResponse {
+  users: UserWithRole[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface ResearchListResponse {
+  researches: ResearchWithAuthorAndFiles[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface AuditLogListResponse {
+  auditLogs: AuditLogWithUser[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 } 

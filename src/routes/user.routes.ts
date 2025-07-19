@@ -1,8 +1,17 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { prisma } from '../index';
-import { authenticateToken, requirePermission } from '../middleware/auth.middleware';
-import { CustomError } from '../middleware/error.middleware';
-import { CreateUserDto, UpdateUserDto, AuthenticatedRequest } from '../types';
+import { UserService } from "../services/user.service";
+import {
+  authenticateToken,
+  requirePermission,
+} from "../middleware/auth.middleware";
+import { CustomError } from "../middleware/error.middleware";
+import {
+  AuthenticatedRequest,
+  CreateUserDto,
+  UpdateUserDto,
+  UserFilters,
+  PaginationOptions,
+} from "../types";
 
 const router = Router();
 
@@ -35,35 +44,20 @@ const router = Router();
  *           format: date-time
  *         role:
  *           type: object
- *     UserListResponse:
- *       type: object
- *       properties:
- *         success:
- *           type: boolean
- *         message:
- *           type: string
- *         data:
- *           type: array
- *           items:
- *             $ref: '#/components/schemas/User'
- *         pagination:
- *           type: object
  *           properties:
- *             page:
- *               type: integer
- *             limit:
- *               type: integer
- *             total:
- *               type: integer
- *             totalPages:
- *               type: integer
+ *             id:
+ *               type: string
+ *             name:
+ *               type: string
+ *             description:
+ *               type: string
  */
 
 /**
  * @swagger
  * /api/users:
  *   get:
- *     summary: List all users
+ *     summary: Get all users
  *     tags: [Users]
  *     security:
  *       - bearerAuth: []
@@ -84,63 +78,78 @@ const router = Router();
  *         name: search
  *         schema:
  *           type: string
- *         description: Search term for email, username, or name
+ *         description: Search term
+ *       - in: query
+ *         name: roleId
+ *         schema:
+ *           type: string
+ *         description: Filter by role ID
+ *       - in: query
+ *         name: isActive
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
  *     responses:
  *       200:
  *         description: List of users
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/UserListResponse'
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     total:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
  *       401:
  *         description: Unauthorized
  *       403:
  *         description: Insufficient permissions
  */
-router.get('/', 
+router.get(
+  "/",
   authenticateToken,
-  requirePermission('users', 'read'),
-  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  requirePermission("users", "read"),
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 10;
-      const search = req.query.search as string;
-      const skip = (page - 1) * limit;
+      const filters: UserFilters = {
+        search: req.query.search as string,
+        roleId: req.query.roleId as string,
+        isActive:
+          req.query.isActive === "true"
+            ? true
+            : req.query.isActive === "false"
+            ? false
+            : undefined,
+      };
 
-      const where = search ? {
-        OR: [
-          { email: { contains: search, mode: 'insensitive' } },
-          { username: { contains: search, mode: 'insensitive' } },
-          { firstName: { contains: search, mode: 'insensitive' } },
-          { lastName: { contains: search, mode: 'insensitive' } }
-        ]
-      } : {};
+      const pagination: PaginationOptions = {
+        page: parseInt(req.query.page as string) || 1,
+        limit: parseInt(req.query.limit as string) || 10,
+      };
 
-      const [users, total] = await Promise.all([
-        prisma.user.findMany({
-          where,
-          skip,
-          take: limit,
-          include: {
-            role: true
-          },
-          orderBy: { createdAt: 'desc' }
-        }),
-        prisma.user.count({ where })
-      ]);
-
-      const totalPages = Math.ceil(total / limit);
+      const result = await UserService.getUsers(filters, pagination);
 
       res.json({
         success: true,
-        message: 'Users retrieved successfully',
-        data: users,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages
-        }
+        message: "Users retrieved successfully",
+        data: result.users,
+        pagination: result.pagination,
       });
     } catch (error) {
       next(error);
@@ -184,32 +193,19 @@ router.get('/',
  *       403:
  *         description: Insufficient permissions
  */
-router.get('/:id',
+router.get(
+  "/:id",
   authenticateToken,
-  requirePermission('users', 'read'),
+  requirePermission("users", "read"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
-
-      const user = await prisma.user.findUnique({
-        where: { id },
-        include: {
-          role: {
-            include: {
-              permissions: true
-            }
-          }
-        }
-      });
-
-      if (!user) {
-        throw new CustomError('User not found', 404);
-      }
+      const user = await UserService.getUserById(id);
 
       res.json({
         success: true,
-        message: 'User retrieved successfully',
-        data: user
+        message: "User retrieved successfully",
+        data: user,
       });
     } catch (error) {
       next(error);
@@ -230,7 +226,28 @@ router.get('/:id',
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/RegisterRequest'
+ *             type: object
+ *             required:
+ *               - email
+ *               - username
+ *               - password
+ *               - firstName
+ *               - lastName
+ *               - roleId
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               username:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               firstName:
+ *                 type: string
+ *               lastName:
+ *                 type: string
+ *               roleId:
+ *                 type: string
  *     responses:
  *       201:
  *         description: User created successfully
@@ -246,53 +263,25 @@ router.get('/:id',
  *                 data:
  *                   $ref: '#/components/schemas/User'
  *       400:
- *         description: Bad request
+ *         description: Invalid input data
  *       401:
  *         description: Unauthorized
  *       403:
  *         description: Insufficient permissions
  */
-router.post('/',
+router.post(
+  "/",
   authenticateToken,
-  requirePermission('users', 'create'),
+  requirePermission("users", "create"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userData: CreateUserDto = req.body;
-
-      // Check if user already exists
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { email: userData.email },
-            { username: userData.username }
-          ]
-        }
-      });
-
-      if (existingUser) {
-        throw new CustomError('User with this email or username already exists', 400);
-      }
-
-      // Verify role exists
-      const role = await prisma.role.findUnique({
-        where: { id: userData.roleId }
-      });
-
-      if (!role) {
-        throw new CustomError('Role not found', 404);
-      }
-
-      const user = await prisma.user.create({
-        data: userData,
-        include: {
-          role: true
-        }
-      });
+      const user = await UserService.createUser(userData);
 
       res.status(201).json({
         success: true,
-        message: 'User created successfully',
-        data: user
+        message: "User created successfully",
+        data: user,
       });
     } catch (error) {
       next(error);
@@ -324,6 +313,7 @@ router.post('/',
  *             properties:
  *               email:
  *                 type: string
+ *                 format: email
  *               username:
  *                 type: string
  *               firstName:
@@ -350,6 +340,8 @@ router.post('/',
  *                   $ref: '#/components/schemas/User'
  *       404:
  *         description: User not found
+ *       400:
+ *         description: Invalid input data
  *       401:
  *         description: Unauthorized
  *       403:
@@ -362,34 +354,7 @@ router.put('/:id',
     try {
       const { id } = req.params;
       const updateData: UpdateUserDto = req.body;
-
-      // Check if user exists
-      const existingUser = await prisma.user.findUnique({
-        where: { id }
-      });
-
-      if (!existingUser) {
-        throw new CustomError('User not found', 404);
-      }
-
-      // If roleId is being updated, verify role exists
-      if (updateData.roleId) {
-        const role = await prisma.role.findUnique({
-          where: { id: updateData.roleId }
-        });
-
-        if (!role) {
-          throw new CustomError('Role not found', 404);
-        }
-      }
-
-      const user = await prisma.user.update({
-        where: { id },
-        data: updateData,
-        include: {
-          role: true
-        }
-      });
+      const user = await UserService.updateUser(id, updateData);
 
       res.json({
         success: true,
@@ -423,6 +388,8 @@ router.put('/:id',
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - isActive
  *             properties:
  *               isActive:
  *                 type: boolean
@@ -455,21 +422,11 @@ router.patch('/:id/deactivate',
       const { id } = req.params;
       const { isActive } = req.body;
 
-      const existingUser = await prisma.user.findUnique({
-        where: { id }
-      });
-
-      if (!existingUser) {
-        throw new CustomError('User not found', 404);
+      if (typeof isActive !== "boolean") {
+        throw new CustomError("isActive must be a boolean", 400);
       }
 
-      const user = await prisma.user.update({
-        where: { id },
-        data: { isActive },
-        include: {
-          role: true
-        }
-      });
+      const user = await UserService.toggleUserStatus(id);
 
       res.json({
         success: true,

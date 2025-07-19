@@ -2,10 +2,16 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { prisma } from '../index';
+import { ResearchService } from "../services/research.service";
 import { authenticateToken, requirePermission } from '../middleware/auth.middleware';
 import { CustomError } from '../middleware/error.middleware';
-import { CreateResearchDto, UpdateResearchDto, AuthenticatedRequest } from '../types';
+import {
+  CreateResearchDto,
+  UpdateResearchDto,
+  AuthenticatedRequest,
+  ResearchFilters,
+  PaginationOptions,
+} from "../types";
 
 const router = Router();
 
@@ -141,72 +147,30 @@ const upload = multer({
  *       403:
  *         description: Insufficient permissions
  */
-router.get('/',
+router.get(
+  "/",
   authenticateToken,
-  requirePermission('researches', 'read'),
+  requirePermission("researches", "read"),
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 10;
-      const search = req.query.search as string;
-      const status = req.query.status as string;
-      const skip = (page - 1) * limit;
+      const filters: ResearchFilters = {
+        search: req.query.search as string,
+        status: req.query.status as string,
+        authorId: req.query.authorId as string,
+      };
 
-      const where: any = {};
+      const pagination: PaginationOptions = {
+        page: parseInt(req.query.page as string) || 1,
+        limit: parseInt(req.query.limit as string) || 10,
+      };
 
-      if (search) {
-        where.OR = [
-          { title: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { abstract: { contains: search, mode: 'insensitive' } }
-        ];
-      }
-
-      if (status) {
-        where.status = status;
-      }
-
-      const [researches, total] = await Promise.all([
-        prisma.research.findMany({
-          where,
-          skip,
-          take: limit,
-          include: {
-            author: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true
-              }
-            },
-            files: {
-              select: {
-                id: true,
-                filename: true,
-                originalName: true,
-                mimeType: true,
-                size: true
-              }
-            }
-          },
-          orderBy: { createdAt: 'desc' }
-        }),
-        prisma.research.count({ where })
-      ]);
-
-      const totalPages = Math.ceil(total / limit);
+      const result = await ResearchService.getResearches(filters, pagination);
 
       res.json({
         success: true,
-        message: 'Researches retrieved successfully',
-        data: researches,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages
-        }
+        message: "Researches retrieved successfully",
+        data: result.researches,
+        pagination: result.pagination,
       });
     } catch (error) {
       next(error);
@@ -250,46 +214,24 @@ router.get('/',
  *       403:
  *         description: Insufficient permissions
  */
-router.get('/:id',
+router.get(
+  "/:id",
   authenticateToken,
-  requirePermission('researches', 'read'),
+  requirePermission("researches", "read"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
 
-      const research = await prisma.research.findUnique({
-        where: { id },
-        include: {
-          author: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true
-            }
-          },
-          files: {
-            include: {
-              uploader: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true
-                }
-              }
-            }
-          }
-        }
-      });
+      const research = await ResearchService.getResearchById(id);
 
       if (!research) {
-        throw new CustomError('Research not found', 404);
+        throw new CustomError("Research not found", 404);
       }
 
       res.json({
         success: true,
-        message: 'Research retrieved successfully',
-        data: research
+        message: "Research retrieved successfully",
+        data: research,
       });
     } catch (error) {
       next(error);
@@ -351,66 +293,30 @@ router.get('/:id',
  *       403:
  *         description: Insufficient permissions
  */
-router.post('/',
+router.post(
+  "/",
   authenticateToken,
-  requirePermission('researches', 'create'),
-  upload.array('files', 10),
+  requirePermission("researches", "create"),
+  upload.array("files", 10),
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const researchData: CreateResearchDto = req.body;
       const files = req.files as Express.Multer.File[];
 
       // Parse keywords if provided as string
-      if (researchData.keywords && typeof researchData.keywords === 'string') {
+      if (researchData.keywords && typeof researchData.keywords === "string") {
         researchData.keywords = JSON.parse(researchData.keywords);
       }
 
-      const research = await prisma.research.create({
-        data: {
-          title: researchData.title,
-          description: researchData.description,
-          abstract: researchData.abstract,
-          keywords: researchData.keywords || [],
-          status: researchData.status || 'DRAFT',
-          authorId: req.user!.id
-        },
-        include: {
-          author: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true
-            }
-          }
-        }
-      });
-
-      // Handle file uploads
-      if (files && files.length > 0) {
-        const fileRecords = await Promise.all(
-          files.map(async (file) => {
-            return prisma.researchFile.create({
-              data: {
-                filename: file.filename,
-                originalName: file.originalname,
-                mimeType: file.mimetype,
-                size: file.size,
-                path: file.path,
-                researchId: research.id,
-                uploadedBy: req.user!.id
-              }
-            });
-          })
-        );
-
-        research.files = fileRecords;
-      }
+      const research = await ResearchService.createResearch(
+        researchData,
+        req.user!.id
+      );
 
       res.status(201).json({
         success: true,
-        message: 'Research created successfully',
-        data: research
+        message: "Research created successfully",
+        data: research,
       });
     } catch (error) {
       next(error);
@@ -474,65 +380,45 @@ router.post('/',
  *       403:
  *         description: Insufficient permissions
  */
-router.put('/:id',
+router.put(
+  "/:id",
   authenticateToken,
-  requirePermission('researches', 'update'),
+  requirePermission("researches", "update"),
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
       const updateData: UpdateResearchDto = req.body;
 
       // Check if research exists
-      const existingResearch = await prisma.research.findUnique({
-        where: { id }
-      });
+      const existingResearch = await ResearchService.getResearchById(id);
 
       if (!existingResearch) {
-        throw new CustomError('Research not found', 404);
+        throw new CustomError("Research not found", 404);
       }
 
       // Check if user can update this research (author or admin)
       if (existingResearch.authorId !== req.user!.id) {
         // Check if user has admin permissions
         const hasAdminPermission = req.user!.role.permissions.some(
-          permission => permission.module === 'researches' && permission.action === 'update'
+          (permission) =>
+            permission.module === "researches" && permission.action === "update"
         );
-        
+
         if (!hasAdminPermission) {
-          throw new CustomError('You can only update your own researches', 403);
+          throw new CustomError("You can only update your own researches", 403);
         }
       }
 
-      const research = await prisma.research.update({
-        where: { id },
-        data: updateData,
-        include: {
-          author: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true
-            }
-          },
-          files: {
-            include: {
-              uploader: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true
-                }
-              }
-            }
-          }
-        }
-      });
+      const research = await ResearchService.updateResearch(
+        id,
+        updateData,
+        req.user!.id
+      );
 
       res.json({
         success: true,
-        message: 'Research updated successfully',
-        data: research
+        message: "Research updated successfully",
+        data: research,
       });
     } catch (error) {
       next(error);
@@ -574,33 +460,30 @@ router.put('/:id',
  *       403:
  *         description: Insufficient permissions
  */
-router.delete('/:id',
+router.delete(
+  "/:id",
   authenticateToken,
-  requirePermission('researches', 'delete'),
+  requirePermission("researches", "delete"),
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const { id } = req.params;
 
-      const research = await prisma.research.findUnique({
-        where: { id },
-        include: {
-          files: true
-        }
-      });
+      const research = await ResearchService.getResearchById(id);
 
       if (!research) {
-        throw new CustomError('Research not found', 404);
+        throw new CustomError("Research not found", 404);
       }
 
       // Check if user can delete this research (author or admin)
       if (research.authorId !== req.user!.id) {
         // Check if user has admin permissions
         const hasAdminPermission = req.user!.role.permissions.some(
-          permission => permission.module === 'researches' && permission.action === 'delete'
+          (permission) =>
+            permission.module === "researches" && permission.action === "delete"
         );
-        
+
         if (!hasAdminPermission) {
-          throw new CustomError('You can only delete your own researches', 403);
+          throw new CustomError("You can only delete your own researches", 403);
         }
       }
 
@@ -612,13 +495,11 @@ router.delete('/:id',
       }
 
       // Delete research (files will be deleted due to cascade)
-      await prisma.research.delete({
-        where: { id }
-      });
+      await ResearchService.deleteResearch(id, req.user!.id);
 
       res.json({
         success: true,
-        message: 'Research deleted successfully'
+        message: "Research deleted successfully",
       });
     } catch (error) {
       next(error);

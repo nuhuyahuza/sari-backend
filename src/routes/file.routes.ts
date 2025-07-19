@@ -8,11 +8,11 @@ import { AuthenticatedRequest } from '../types';
 
 const router = Router();
 
-// Permission type definition
+// Permission type definition matching Prisma schema
 interface Permission {
   id: string;
   name: string;
-  description?: string;
+  description: string | null;
   module: string;
   action: string;
   createdAt: Date;

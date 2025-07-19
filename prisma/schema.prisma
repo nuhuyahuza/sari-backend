@@ -1,0 +1,115 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  firstName String
+  lastName  String
+  isActive  Boolean  @default(true)
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  researches    Research[]    @relation("UserResearches")
+  createdFiles  ResearchFile[] @relation("UserCreatedFiles")
+  auditLogs     AuditLog[]    @relation("UserAuditLogs")
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions Permission[]
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  module      String   // e.g., "users", "researches", "files", "roles"
+  action      String   // e.g., "create", "read", "update", "delete"
+  roles       Role[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([module, action])
+  @@map("permissions")
+}
+
+model Research {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  abstract    String?
+  keywords    String[]
+  status      ResearchStatus @default(DRAFT)
+  authorId    String
+  author      User     @relation("UserResearches", fields: [authorId], references: [id])
+  files       ResearchFile[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("researches")
+}
+
+model ResearchFile {
+  id         String   @id @default(cuid())
+  filename   String
+  originalName String
+  mimeType   String
+  size       Int
+  path       String
+  researchId String
+  research   Research @relation(fields: [researchId], references: [id], onDelete: Cascade)
+  uploadedBy String
+  uploader   User     @relation("UserCreatedFiles", fields: [uploadedBy], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("research_files")
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation("UserAuditLogs", fields: [userId], references: [id])
+  action    String      // e.g., "CREATE", "UPDATE", "DELETE", "LOGIN"
+  module    String      // e.g., "User", "Research", "File"
+  resourceId String?    // ID of the affected resource
+  details   Json?       // Additional details about the action
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime    @default(now())
+
+  @@map("audit_logs")
+}
+
+enum ResearchStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  PUBLISHED
+} 

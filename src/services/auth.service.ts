@@ -16,6 +16,7 @@ export class AuthService {
    * Authenticate user and generate JWT token
    */
   static async login(loginData: LoginDto) {
+    console.log(loginData);
     const { email, password } = loginData;
 
     if (!email || !password) {

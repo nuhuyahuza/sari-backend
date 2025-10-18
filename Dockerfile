@@ -1,5 +1,4 @@
-FROM node:18-alpine
-
+FROM node:22-alpine
 # Set working directory
 WORKDIR /app
 
@@ -7,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN yarn install --production=false
 
 # Copy source code
 COPY . .
@@ -16,7 +15,7 @@ COPY . .
 RUN npx prisma generate
 
 # Build the application
-RUN npm run build
+# RUN yarn build
 
 # Create uploads directory
 RUN mkdir -p uploads
@@ -25,4 +24,4 @@ RUN mkdir -p uploads
 EXPOSE 3000
 
 # Start the application
-CMD ["npm", "start"] 
+CMD ["yarn", "dev"] 

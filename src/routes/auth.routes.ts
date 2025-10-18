@@ -123,6 +123,8 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const loginData: LoginDto = req.body;
+        console.log("loginData", loginData);
+        console.log("req.body", req.body);
       const result = await AuthService.login(loginData);
 
       res.json({
